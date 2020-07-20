@@ -5,7 +5,7 @@ metadata:
   labels:
     app: iris
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: iris
@@ -16,14 +16,14 @@ spec:
     spec:
       containers:
       - name: iris-app
-        image: ""
+        image: "gcr.io/sandfox/iris-app:v3"
         resources:
           limits:
             cpu: "500m"
             memory: "256Mi"
         ports:
         - protocol: TCP
-          containerPort: 8080
+          containerPort: 5000
 
 ---
 
@@ -37,5 +37,5 @@ spec:
   ports:
   - protocol: TCP
     port: 80
-    targetPort: 8080
+    targetPort: 5000
   type: LoadBalancer
