@@ -46,7 +46,7 @@ spec:
       when { branch 'master' }
       steps{
         container('kubectl') {
-          sh("sed -i.bak 's#gcr.io/sandfox/iris-app:v3#${IMAGE_TAG}#' k8s/deployments/deployment.yaml")
+          sh("sed -i.bak 's#gcr.io/sandfox/iris-app:v3#${IMAGE_TAG}#' ./k8s/deployments/deployment.yaml")
           step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT, clusterName: env.CLUSTER, zone: env.CLUSTER_ZONE, manifestPattern: 'k8s/services', credentialsId: env.JENKINS_CRED, verifyDeployments: false])
           step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT, clusterName: env.CLUSTER, zone: env.CLUSTER_ZONE, manifestPattern: 'k8s/deployments', credentialsId: env.JENKINS_CRED, verifyDeployments: true])
           sh("echo http://`kubectl get service/${SVC_NAME} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'` > ${SVC_NAME}")
