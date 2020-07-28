@@ -1,4 +1,3 @@
-import pytest
 from flask import json
 from app import app
 
@@ -9,7 +8,7 @@ payload = {
     'petal_width': .5
 }
 
-@pytest.fixture
+
 def test_app():
     response = app.test_client().post('/predict', data=payload)
 
