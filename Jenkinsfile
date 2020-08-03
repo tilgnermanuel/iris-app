@@ -22,7 +22,7 @@ spec:
   serviceAccountName: jenkins-server
   containers:
   - name: flask
-    image: gcr.io/sandfox/iris-app:v3
+    image: gcr.io/sandfox/iris-app:v1
     command:
     - cat
     tty: true
@@ -40,25 +40,25 @@ spec:
     }
   }
   stages {
-    stage('Build Image') {
+    stage('Build') {
       steps {
         container('gcloud') {
           sh "PYTHONUNBUFFERED=1 gcloud builds submit -t ${IMAGE_TAG} ."
         }
       }
     }
-    stage('Test API') {
+    stage('Test') {
       steps {
         container('flask') {
           sh "python -m pytest test.py"
         }
       }
     }
-    stage('Deploy Image') {
+    stage('Deploy') {
       when { branch 'master' }
       steps{
         container('kubectl') {
-          sh("sed -i.bak 's#gcr.io/sandfox/iris-app:v3#${IMAGE_TAG}#' ./k8s/deployments/deployment.yaml")
+          sh("sed -i.bak 's#gcr.io/sandfox/iris-app:v1#${IMAGE_TAG}#' ./k8s/deployments/deployment.yaml")
           step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT, clusterName: env.CLUSTER, zone: env.CLUSTER_ZONE, manifestPattern: 'k8s/services', credentialsId: env.JENKINS_CRED, verifyDeployments: false])
           step([$class: 'KubernetesEngineBuilder', projectId: env.PROJECT, clusterName: env.CLUSTER, zone: env.CLUSTER_ZONE, manifestPattern: 'k8s/deployments', credentialsId: env.JENKINS_CRED, verifyDeployments: true])
           sh("echo http://`kubectl get service/${SVC_NAME} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'` > ${SVC_NAME}")
