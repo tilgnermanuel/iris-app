@@ -22,7 +22,7 @@ spec:
   serviceAccountName: jenkins-server
   containers:
   - name: flask
-    image: ${IMAGE_TAG}
+    image: gcr.io/sandfox/iris-app:v3
     command:
     - cat
     tty: true
