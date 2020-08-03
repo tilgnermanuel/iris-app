@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: iris-app
-        image: "gcr.io/sandfox/iris-app:v3"
+        image: "gcr.io/sandfox/iris-app:v1"
         resources:
           limits:
             cpu: "500m"
