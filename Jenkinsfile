@@ -21,6 +21,11 @@ labels:
 spec:
   serviceAccountName: jenkins-server
   containers:
+  - name: flask
+    image: ${IMAGE_TAG}
+    command:
+    - cat
+    tty: true
   - name: gcloud
     image: gcr.io/cloud-builders/gcloud
     command:
@@ -39,6 +44,13 @@ spec:
       steps {
         container('gcloud') {
           sh "PYTHONUNBUFFERED=1 gcloud builds submit -t ${IMAGE_TAG} ."
+        }
+      }
+    }
+    stage('Test API') {
+      steps {
+        container('flask') {
+          sh "python -m pytest test.py"
         }
       }
     }
