@@ -4,7 +4,7 @@ pipeline {
     APP_NAME = "iris-app"
     SVC_NAME = "${APP_NAME}-service"
     CLUSTER = "iris-cluster"
-    CLUSTER_ZONE = "us-east1-d"
+    CLUSTER_ZONE = "us-central1-a"
     IMAGE_TAG = "gcr.io/${PROJECT}/${APP_NAME}:v${env.BUILD_NUMBER}"
     JENKINS_CRED = "${PROJECT}"
   }
