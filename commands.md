@@ -2,53 +2,65 @@
 
 ### Introduction
 
-This tutorial walks you through the steps of setting up a simple CI/CD Pipeline using Jenkins und Google Kubernetes Engine (GKE). We start by packaging a Flask app in a Docker container to prepare it for deployment. Next we set up a Kubernetes cluster and install Jenkins. As a final step, we build a Jenkins pipeline and run it. The goal is to host a web service, concretely an API on GKE for public access.
+In this tutorial we set up a simple CI/CD Pipeline for a Flask app using Jenkins und Google Kubernetes Engine (GKE) in three steps. First, we containerize the app to prepare it for deployment. Second, we set up a Kubernetes cluster and install Jenkins. Third, we build a Jenkins pipeline and run it. The goal is to have our app running on GKE as an API. Whenever we make changes to the app code, the new version of the app should automatically be deployed.
 
-Our starting point is a Flask-based API written by my colleague Jannik. This API exposes a K-Nearest Neighbor (KNN) model that provides predictions based on the iris dataset. By turning a model into an API, you can make it available to others. People can then send an HTTP request to the API with measurements (petal length=4) and get a response ("This most likely is the species Setosa"). If you're curious, check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
+Our starting point is a Flask-based API written by my colleague Jannik. His API exposes a K-Nearest Neighbor (KNN) model that provides predictions based on the iris dataset. Turning a model into an API is a quick way to make it available to others. People can send an HTTP request to the API with measurements (petal_length=4) and get a response ("This most likely belongs to the species Setosa"). If you're curious, check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
 
-Today I want to show you how to take this API and integrate into a CI/CD pipeline using Jenkins which deploys to Kubernetes. Both tools can be daunting, especially if you're just starting out deploying your models. My hope is to give you a better understanding of the these tools as a well as a simple template that you can tweak for your deployments.
+Our objective is to set up a Jenkins pipeline which deploys this API to Kubernetes. Jenkins and Kubernetes can be daunting when first starting out. My hope is to give you a better understanding of the these tools and provide you with a template that you can tweak for your deployments. This tutorial is geared towards a deployment on Google Cloud Platform (GCP) and uses auxiliary services such as Cloud Source Repositories, Cloud Build and Cloud Container Registry.
+
+Note: The post uses Flask app, app und API interchangeably. 
 
 ### Dockerizing the app
 
-For this step I assume that you already have a Flask app (I use the words Flask app, app und API interchangeably here). If not, you can just use the one from my GitHub repo. It's mostly based on Jannik's app with some small modifications for the purposes of this tutorial. 
+For this step, I assume that you already have a Flask app. If not, just copy the one from our GitHub repo. It's mostly based on Jannik's app with a few changes for the purposes of this tutorial. 
 
 ```bash
 git clone https://...
 ```
 
-Once you have the app, we can containerize it with Docker. For this we create a Dockerfile. To keep the image small, we use the `python:3.7-slim` base image. Then we create a new directory in the container and copy our app code including the Python package requirements. Using pip, we install all required packages. At last, we expose the container on port 8080 and specify the start-up command. And done! For an app as simple as ours, that's all we need to do.
+Once you have the app, we containerize it with Docker. For this we create a Dockerfile. To keep the image small, we use the `python:3.7-slim` base image. Then we create a new directory in the container and copy our app code including the Python package requirements. Using pip, we install all required packages. Finally, we expose the container on port 8080 and specify the start-up command. 
 
-### CI/CD 
+Done! For an app as simple as ours, that's all we need to do.
+
+### What is CI/CD?
 
 CI/CD stands for Continuous Integration/Continuous Delivery. Continuous integration means developers integrate their code changes with high frequency. Continuous development means code is pushed out to production on a regular basis, multiple times a day. Both concepts often go together. 
 
 Here we build a CI/CD pipeline which is nothing more that a series of steps taking code from a version control system to a target environment.
 
-### Jenkins
+### What is Kubernetes?
 
-Jenkins is an open-source tool which allows you to automate the process of building, testing and deploying applications to different environments (e.g. Kubernetes). A Jenkins Pipeline is specified with the help of a so-called Jenkinsfile and consists of one or more stages. Each stage must be completed for the pipeline to succeed. 
+Kubernetes is an open-source container orchestration platform for deploying, managing and scaling containerized applications, workflows and services. Google Kubernetes Engine is simply a hosted version of Kubernetes.
 
-Below is the pipeline that we use to deploy our app on GKE. It has three stages: `Build`, `Test` and `Deploy`. Each stage is executed in a different container. It is good practice to have a stage run in a container which contains all dependencies that the stage requires.
+### What is Jenkins? 
 
-The `Build` stage uses the `gcloud` to build an image from our Dockerfile and save it to GCP's Container Registry. The image tag in this case is dynamic: its version number corresponds to the build number, an environment variable that is available per default in Jenkins.
+Jenkins is an open-source tool that automates the process of building, testing and deploying software.
 
-The `Test`stage uses the image that we just built and tests it using `pytest`. Does our API work? If our test passes, the stage is successful and we move on. A
+### How to define a Jenkins Pipeline
 
-The `Deploy`stage at last deploys the app to the Kubernetes cluster running with GKE. This requires deployment and service manifest file. How to define these files is beyond the scope of this tutorial. A good starting point is the Kubernetes homepage.
+A Jenkins Pipeline is defined with a Jenkinsfile and consists of one or more stages. Each stage must be completed for the entire pipeline to succeed. 
 
-If you're following along, note that pods / containers defined in our Kubernetes manifest have to be runnable from the get-go. That is, the initial version of our app  (iris-app:v1) must exist in the Container Registry _before_ the pipeline runs for the first time. This is why prior to triggering the pipeline, you once have to build the image manually:
+The Pipeline we use to deploy our app has three stages: `Build`, `Test` and `Deploy`. Each stage is executed in a different container. It is good practice to have a stages run in a clean environment that contains all required  dependencies.
+
+The `Build` stage uses the `gcloud` container to build an image from our Dockerfile and save it to GCP's Container Registry. The image tag is dynamic: its version number corresponds to the build number, an environment variable that is available per default in Jenkins.
+
+The `Test`stage uses the image that we just built and tests it using `pytest`. Does our API work? If our test passes, the stage is successful and we move on to the next stage.
+
+The `Deploy`stage deploys the app to the Kubernetes cluster. This requires Kubernetes manifest files for the deployment and the load balancer. How to define these files is beyond the scope of this tutorial however. The Kubernetes homepage provides some great resources however.
+
+A caveat: containers defined in our Kubernetes agent (explained shortly) have to be available from the get-go. In other words, the initial version of our app  (iris-app:v1) must exist in the Container Registry _before_ the pipeline runs for the first time. This is why you once have to build the image manually:
 
 ```bash
 gcloud builds submit -t gcr.io/sandfox/iris-app:v1
 ```
 
-Important here is the Kubernetes Plugin `KubernetesEngineBuilder`. Here are the arguments in turn:
+Let's break down the Jenkins Pipeline, step by step:
 
-* $class: the Google Kubernetes Engine Builder Plugin
-* projectId: the ID of your GCP project (here: sandfox)
-* clusterName: the name of your cluster (here: my-cluster)
-* manifestPattern: the pattern of the Kubernetes manifest to be deployed
-* verifyDeployments: whether to verify the deployments or not
+- A declarative pipeline starts with the `pipeline { }` block.
+- The `environment` directive defines environment variables for the pipeline. This can be done at the top level, stage level or both. Here, we define environment variables that are valid for all steps at the top level.
+- The `agent` section determines where the pipeline or one of its stages runs. It must be defined in the top level pipeline block. Here, we use the Kubernetes agent which runs stages inside a Pod deployed on a Kubernetes cluster. The Pod template is defined within the `kubernetes { }` block using yaml syntax.
+- The `stages`section consists of one or more `stage` directives. This is where where most of the action takes place. We have three stages: `Build`, `Test`and `Deploy`. 
+- The `steps` section specifies one or more steps to be run in a `stage` directive. In this case, most steps consists of shell commands in the containers specified by the Kubernetes agent.
 
 ```groovy
 pipeline {
@@ -122,27 +134,37 @@ spec:
 }
 ```
 
-Let's go through the other sections in turn:
+The shell commands are self-explanatory. More interesting here is the Kubernetes Plugin `KubernetesEngineBuilder`. Here are the arguments in turn:
 
-- A declarative pipeline starts with the `pipeline { }` block at the top-level.
-- In the `environment` directive we define environment variables for the pipeline. This can be done at the top level, stage level or both. In our case, we define variables like the the project id, cluster name and image tag.
-- The `agent` section determines where the pipeline or one of its stages runs. It must be defined in the top-level pipeline block. It can moreover be defined in a stage block. Here, we use the Kubernetes agent. With the Kubernetes agent, individual stages of the pipeline run inside a pod deployed on a Kubernetes cluster. The pod template is defined within the `kubernetes { }` block. 
-- The `stages`section consists of one or more `stage` directives which is where most of the action takes place.
-- The `steps` section specifies one or more steps to be executed in a `stage` directive. In our case, this consists mostly of running shell commands the containers specified in the Kubernetes yaml.
+* $class: the Google Kubernetes Engine Builder Plugin
+* projectId: the ID of your GCP project (here: sandfox)
+* clusterName: the name of your cluster (here: my-cluster)
+* manifestPattern: the pattern of the Kubernetes manifest to be deployed
+* verifyDeployments: whether to verify the deployments or not
+
+To sum up, our Jenkinsfile defines a Pipeline that will:
+
+1. Check out code from Cloud Source Repository.
+2. Build an Docker image of our app based on the Dockerfile.
+3. Push the image to Cloud Container Registry.
+4. Pull the image to run tests against it.
+5. Deploy an instance of the image, i.e. a container, to Google Kubernetes engine as part of an deployment with an associated Load Balancer.
+
+But enough theory. Let's set up our GKE cluster!
 
 ### How to set up a Google Kubernetes Engine Cluster
 
-Set your compute zone:
+Navigate to the GCP console and open your cloud shell. Start by setting and exporting your project.
+
+```bash
+gcloud config set project <YOUR-PROJECT-ID>
+export PROJECT=$(gcloud config get-value project)
+```
+
+Next, define your preferred compute zone (saves some typing later):
 
 ```bash
 gcloud config set compute/zone us-central1-a
-```
-
-Export your project as an environment variable:
-
-```bash
-gcloud config set project sandfox
-export PROJECT=$(gcloud config get-value project)
 ```
 
 Create a service account for Jenkins:
@@ -152,9 +174,7 @@ gcloud iam service-accounts create jenkins-sa --display-name jenkins
 -sa
 ```
 
-This follows the principle of least privilege.
-
-Give the service account specific permissions according to Google's predefined roles.
+Following the principle of least privilege, give the service account only the permissions that it needs in line with Google's predefined roles.
 
 ```bash
 gcloud projects add-iam-policy-binding $PROJECT \
@@ -182,9 +202,9 @@ gcloud projects add-iam-policy-binding $PROJECT \
     --role "roles/container.developer"
 ```
 
-Navigate to your Google Cloud Console's IAM page to ensure that the service account got all required permissions.
+Once you're done, navigate to GCP's "IAM & Admin", then "IAM" and verify that your service account has the required permissions. If all looks good, click on "Service Accounts" and create JSON key from your Jenkins service account that we need later.
 
-Create a mini Google Kubernetes Cluster:
+Now, create a Google Kubernetes Engine cluster with the service account defined above:
 
 ```bash
 gcloud container clusters create my-cluster \
@@ -194,13 +214,13 @@ gcloud container clusters create my-cluster \
   --service-account "jenkins-sa@$PROJECT.iam.gserviceaccount.com"
 ```
 
-Fetch the credentials of your newly created cluster:
+Once the cluster is up and running, fetch the credentials:
 
 ```bash
 gcloud container clusters get-credentials my-cluster
 ```
 
-Grant your GCP login account cluster admin permissions in the cluster's RBAC. This allows you create cluster role bindings for Jenkins later.
+Grant your GCP account cluster admin permissions in the cluster's RBAC. This allows you create cluster role bindings for Jenkins. You find this yaml file under k8s/rbac in the GitHub repository.
 
 ```yaml
 # cluster-admin-binding.yaml
@@ -215,19 +235,21 @@ roleRef:
 subjects:
 - apiGroup: rbac.authorization.k8s.io
   kind: User
-  name: tilgner.manuel@gmail.com
+  name: <YOUR-GCP-E-MAIL-LOGIN>
 ```
 
-Download and install `Helm`, the package manager for Kubernetes that allows you to deploy complex applications in a few steps. For this we install the helm binary and add the official stable repository.
+In your home directory, download and install `Helm`, which is the package manager for Kubernetes. We will use  it to install Jenkins with a stable chart.
 
 ```bash
+cd
 wget https://get.helm.sh/helm-v3.2.1-linux-amd64.tar.gz
 tar -zxfv helm-v3.2.1-linux-amd64.tar.gz
-cp linux-amd64/helm .
+cd linux-amd64
+cp helm ../iris-app && cd ../iris-app
 ./helm repo add stable https://kubernetes-charts.storage.googleapis.com
 ```
 
-Create a values file which contains the Jenkins plugins we need for this pipeline to work. These plugins allow us among others to use the service account we created to access and modify Google Cloud resources.
+Create a jenkins-values.yaml file which specifies the plugins we need for the Pipeline. These plugins allow us to use the service account we created to interact with Google APIs.
 
 ```yaml
 master:
@@ -270,7 +292,7 @@ Install Jenkins on Kubernetes with the following command:
 ./helm install jenkins-server -f jenkins-values.yaml stable/jenkins --version 1.7.3 --wait
 ```
 
-Give the Jenkins service account permissions to deploy to the cluster:
+Now, give the Jenkins service account permission to deploy to the cluster:
 
 ```bash
 # jenkins-cluster-admin-binding.yaml
@@ -288,27 +310,23 @@ subjects:
   namespace: default
 ```
 
-Set up port forwarding from the Google Cloud Shell:
+In order to reach the Jenkins UI, you need to set up port forwarding from the Google Cloud Shell:
 
 ```bash
 export JENKINS_POD=$(kubectl get pods --namespace default -l "app.kubernetes.io/component=jenkins-master" -l "app.kubernetes.io/instance=jenkins-server" -o jsonpath="{.items[0].metadata.name}")
 kubectl port-forward $JENKINS_POD 8080:8080
 ```
 
-In a new tab, fetch the Jenkins password:
+In a shell new tab, fetch the Jenkins password:
 
 ```bash
 printf $(kubectl get secret --namespace default jenkins-server -o jsonpath="{.data.jenkins-admin-password}" | base64 --decode); echo
 ```
 
-Set up a GCP source repository:
+You are now able to log into Jenkins with the username "admin"!
 
-```bash
-git init
-gcloud source repos create setosa
-git config --global credential.https://source.developers.google.com.helper gcloud.sh
-git remote add google https://source.developers.google.com/p/sandfox/r/setosa
-git push --all google
-```
+Once logged in, you need to set up your service account credential. For this click on "Manage Jenkins" > "Manage Credentials" > Click on "global" > "Add credentials" > Select "Google Service Account from private Key" > Enter project name and upload your JSON key from the first part of the tutorial.
 
-Note that if Jenkins is still searching for the next available executor, it could be the case that your machines are under provisioned or that something in your Jenkinsfile is wrong, e.g. wrong cluster or service account name. Checking the system logs is helpful here.
+Now go to Jenkins main page, create a new item, specifically a Multibranch Pipeline and give it the name "iris-app". Add a source git and paste in the https url of your repository. From the credentials dropdown select the credential you just created. 
+
+Finally, set "Scan Multibranch Pipeline Triggers" to periodically if not otherwise run with an Interval of 1 minute. And then sit back and watch as Jenkins deploys your app!
