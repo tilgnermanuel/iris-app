@@ -2,41 +2,47 @@
 
 ### Introduction
 
-In this tutorial we set up a simple CI/CD Pipeline for a Flask app using Jenkins und Google Kubernetes Engine (GKE) in three steps. First, we containerize the app to prepare it for deployment. Second, we set up a Kubernetes cluster and install Jenkins. Third, we build a Jenkins pipeline and run it. The goal is to have our app running on GKE as an API. Whenever we make changes to the app code, the new version of the app should automatically be deployed.
+In this tutorial, we set up a simple CI/CD pipeline for a Flask app using Jenkins and Google Kubernetes Engine (GKE). To do this, we first containerize the app with Docker. Then, we set up a Kubernetes cluster on Google Cloud Platform (GCP). Last, we define a Jenkins pipeline and run it. The objective is to have our app running on GKE as an API. The point of the CI/CD pipeline is that whenever we make changes to our app, Jenkins automatically deploys a new version.
 
-Our starting point is a Flask-based API written by my colleague Jannik. His API exposes a K-Nearest Neighbor (KNN) model that provides predictions based on the iris dataset. Turning a model into an API is a quick way to make it available to others. People can send an HTTP request to the API with measurements (petal_length=4) and get a response ("This most likely belongs to the species Setosa"). If you're curious, check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
+Our starting point is a Flask app written by my colleague Jannik. His app exposes a K-Nearest Neighbor model trained on the iris dataset as an API. Packing a model into an API is a quick and easy way to make it available to others. People can send requests to the API with measurements (petal_length=4) and get a response ("This most likely belongs to the species Setosa"). If you're curious, check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
 
-Our objective is to set up a Jenkins pipeline which deploys this API to Kubernetes. Jenkins and Kubernetes can be daunting when first starting out. My hope is to give you a better understanding of the these tools and provide you with a template that you can tweak for your deployments. This tutorial is geared towards a deployment on Google Cloud Platform (GCP) and uses auxiliary services such as Cloud Source Repositories, Cloud Build and Cloud Container Registry.
-
-Note: The post uses Flask app, app und API interchangeably. 
+Ultimately, we want a Jenkins Pipeline (with capital P) which deploys this app to Kubernetes. My hope is to provide you with a better understanding as well as a template that you can tweak for your own deployments. Quick note: This tutorial is tailored to the Google Cloud Platform and uses auxiliary services such as Cloud Source Repositories, Cloud Build and Cloud Container Registry. If you use a different cloud provider, setting up Kubernetes will differ, but you can still use the Kubernetes and Jenkins code samples. 
 
 ### Dockerizing the app
 
-For this step, I assume that you already have a Flask app. If not, just copy the one from our GitHub repo. It's mostly based on Jannik's app with a few changes for the purposes of this tutorial. 
+For this step, I assume that you already have a Flask app. If not, just copy the one from our GitHub repo. It is mostly based on Jannik's app with a few changes for the purposes of this tutorial. 
 
 ```bash
 git clone https://...
 ```
 
-Once you have the app, we containerize it with Docker. For this we create a Dockerfile. To keep the image small, we use the `python:3.7-slim` base image. Then we create a new directory in the container and copy our app code including the Python package requirements. Using pip, we install all required packages. Finally, we expose the container on port 8080 and specify the start-up command. 
+Once we have the app code, we containerize it with Docker. For this we create a Dockerfile in the root of the directory. To keep the image small, we use the `python:3.7-slim` base image. Then, we create a new directory in the container and copy our app code including the Python package requirements. Using pip, we install all required packages. In the end, we expose the container on port 8080 and specify the start-up command. 
 
-Done! For an app as simple as ours, that's all we need to do.
+```dockerfile
+FROM python:3.7-slim
+WORKDIR /app
+COPY requirements.txt app.py model.py test.py iris.mdl /app/
+RUN pip3 install -r requirements.txt
+EXPOSE 8080
+ENTRYPOINT [ "python3" ]
+CMD [ "app.py" ]
+```
+
+And done! 
 
 ### What is CI/CD?
 
-CI/CD stands for Continuous Integration/Continuous Delivery. Continuous integration means developers integrate their code changes with high frequency. Continuous development means code is pushed out to production on a regular basis, multiple times a day. Both concepts often go together. 
+CI/CD is a core concept in the world of DevOps. It stands for Continuous Integration/Continuous Delivery. Continuous Integration (CI) means that developers integrate their code in a central shared repository. Every commit creates a build which is verified by a test. In essence, every code change triggers a complete software life cycle. This makes it possible to quickly detect and fix errors.
 
-Here we build a CI/CD pipeline which is nothing more that a series of steps taking code from a version control system to a target environment.
-
-### What is Kubernetes?
-
-Kubernetes is an open-source container orchestration platform for deploying, managing and scaling containerized applications, workflows and services. Google Kubernetes Engine is simply a hosted version of Kubernetes.
+Continuous Delivery (CD) is an extension of CI. It means releasing software within short cycles. It is different from Continuous Deployment in that in CD we create a build of the software that _could_ be released to production but is not. In Continuous Deployment, every build is is also released to production. Some of the larger tech companies deliver (deploy) software hundreds times per day!
 
 ### What is Jenkins? 
 
-Jenkins is an open-source tool that automates the process of building, testing and deploying software.
+To make CI/CD happen, we first need a code repository server, such as GitHub or Google Cloud Source Repositories, where we store our code. On top of that, we need a CI/CD server which takes the code from the repository server, builds our software, tests it and (optionally) deploys it. This where Jenkins comes in. Jenkins is an automation server that handles this process. It is open source, highly extensible and one the most popular solutions for CI/CD workflows.
 
-### How to define a Jenkins Pipeline
+### What is a Jenkins Pipeline?
+
+At the heart of Jenkins is the Jenkins Pipeline, a suite of plugins that can be used to set up simple to highly complex continuous integration and delivery pipelines. 
 
 A Jenkins Pipeline is defined with a Jenkinsfile and consists of one or more stages. Each stage must be completed for the entire pipeline to succeed. 
 
