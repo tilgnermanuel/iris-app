@@ -2,21 +2,43 @@
 
 ### Introduction
 
-In this tutorial, we set up a simple CI/CD pipeline for a Flask app using Jenkins and Google Kubernetes Engine (GKE). To do this, we first containerize the app with Docker. Then, we set up a Kubernetes cluster on Google Cloud Platform (GCP). Last, we define a Jenkins pipeline and run it. The objective is to have our app running on GKE as an API. The point of the CI/CD pipeline is that whenever we make changes to our app, Jenkins automatically deploys a new version.
+In this tutorial, we set up a simple CI/CD pipeline for a Flask app using Jenkins and Google Kubernetes Engine (GKE). To do this, we first containerize the app with Docker. Then, we set up a Kubernetes cluster on Google Cloud Platform (GCP). Last, we define a Jenkins pipeline and run it. The objective is to have our app running on GKE as a web service. 
 
-Our starting point is a Flask app written by my colleague Jannik. His app exposes a K-Nearest Neighbor model trained on the iris dataset as an API. Packing a model into an API is a quick and easy way to make it available to others. People can send requests to the API with measurements (petal_length=4) and get a response ("This most likely belongs to the species Setosa"). If you're curious, check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
+Why bother setting up a whole CI/CD pipeline? Can't we just deploy our app to GKE directly? We can. But imagine having to do this manually over and over again, every time you make a small change to your app. Why not just let Jenkins do the work and automatically deploy the app when a new version becomes available?
 
-Ultimately, we want a Jenkins Pipeline (with capital P) which deploys this app to Kubernetes. My hope is to provide you with a better understanding as well as a template that you can tweak for your own deployments. Quick note: This tutorial is tailored to the Google Cloud Platform and uses auxiliary services such as Cloud Source Repositories, Cloud Build and Cloud Container Registry. If you use a different cloud provider, setting up Kubernetes will differ, but you can still use the Kubernetes and Jenkins code samples. 
+### Introducing the app
+
+Our starting point is a Flask app developed by my colleague Jannik. This Flask app exposes a K-Nearest Neighbor model as an API, which is a quick and simple way to share it others. People can send requests to the API with data they collected and get a prediction without complex technology or prerequisite knowledge. Check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
+
+In order for others to use Jannik's API, we need to run it somewhere. While there are many options, such as VMs, serverless solutions (e.g. Cloud Run, Heroku) and others, a Kubernetes cluster has several benefits. We can complement the API with other services (e.g. a database), easily scale it up and down or load balance it, perform rolling updates and more.
+
+Deploying the app manually however is tedious, inefficient and error-prone. That's why we bring in Jenkins to do it for us. Both Kubernetes and Jenkins are as powerful as they are complex. My hope is to provide you with a better understanding as well as a template that you can tweak for your own deployments. 
+
+A heads-up: This tutorial is geared towards GCP and uses auxiliary services such as IAM, Cloud Build and Cloud Container Registry. To keep things short and focused, I won't discuss them further. Moreover, if you use a different cloud provider, setting up Kubernetes will differ, but you can still use the Kubernetes and Jenkins code samples. 
 
 ### Dockerizing the app
 
-For this step, I assume that you already have a Flask app. If not, just copy the one from our GitHub repo. It is mostly based on Jannik's app with a few changes for the purposes of this tutorial. 
+Open your cloud shell on GCP. First, let's set some environment variables.
 
 ```bash
-git clone https://...
+gcloud config set project <YOUR-PROJECT-ID>
+export PROJECT=$(gcloud config get-value project)
 ```
 
-Once we have the app code, we containerize it with Docker. For this we create a Dockerfile in the root of the directory. To keep the image small, we use the `python:3.7-slim` base image. Then, we create a new directory in the container and copy our app code including the Python package requirements. Using pip, we install all required packages. In the end, we expose the container on port 8080 and specify the start-up command. 
+Next, define your preferred compute zone (saves some typing later):
+
+```bash
+gcloud config set compute/zone us-central1-a
+```
+
+Then, clone the GitHub repository and change into the directory.
+
+```bash
+git clone https://github.com/tilgnermanuel/iris-app.git
+cd iris-app
+```
+
+You should now see the raw app code. Time to containerize it! For this we use the Dockerfile.
 
 ```dockerfile
 FROM python:3.7-slim
@@ -28,37 +50,41 @@ ENTRYPOINT [ "python3" ]
 CMD [ "app.py" ]
 ```
 
-And done! 
+What happens here is that we copy the app code to the container and install all dependencies. Then, we expose the app on port 8080. That's it!
+
+For reasons I'll explain later, we have to perform one initial build of the app and submit it to the Google Cloud Container registry. Make sure to give it the same tag or Jenkins won't be able to find it later.
+
+```bash
+gcloud builds submit -t gcr.io/$PROJECT/iris-app:v1
+```
+
+
 
 ### What is CI/CD?
 
 CI/CD is a core concept in the world of DevOps. It stands for Continuous Integration/Continuous Delivery. Continuous Integration (CI) means that developers integrate their code in a central shared repository. Every commit creates a build which is verified by a test. In essence, every code change triggers a complete software life cycle. This makes it possible to quickly detect and fix errors.
 
-Continuous Delivery (CD) is an extension of CI. It means releasing software within short cycles. It is different from Continuous Deployment in that in CD we create a build of the software that _could_ be released to production but is not. In Continuous Deployment, every build is is also released to production. Some of the larger tech companies deliver (deploy) software hundreds times per day!
+Continuous Delivery (CD) is an extension of CI. It generally implies releasing software within short cycles. It's different from Continuous Deployment in that we create a build of the software that _could_ be released to production, but isn't. In Continuous Deployment, every build is is also deployed to production. Some of the larger tech companies deliver (deploy) software hundreds times per day!
 
 ### What is Jenkins? 
 
-To make CI/CD happen, we first need a code repository server, such as GitHub or Google Cloud Source Repositories, where we store our code. On top of that, we need a CI/CD server which takes the code from the repository server, builds our software, tests it and (optionally) deploys it. This where Jenkins comes in. Jenkins is an automation server that handles this process. It is open source, highly extensible and one the most popular solutions for CI/CD workflows.
+To make CI/CD happen, we need a repository server to store our code, e.g. GitHub, On top of that, we need a CI/CD server that takes the code from the repository, builds our application, tests it and (optionally) deploys it. This where Jenkins comes in. Jenkins is an automation server that does just that. It's open source, highly extensible and one the most popular solutions for CI/CD.
 
 ### What is a Jenkins Pipeline?
 
-At the heart of Jenkins is the Jenkins Pipeline, a suite of plugins that can be used to set up simple to highly complex continuous integration and delivery pipelines. 
+At the heart of Jenkins lies the Jenkins Pipeline, a suite of plugins that can be used to set up simple to highly complex CI/CD workflows. A Jenkins Pipeline is defined with a Jenkinsfile and consists of one or more stages. Each stage must be completed for the entire pipeline to succeed. 
 
-A Jenkins Pipeline is defined with a Jenkinsfile and consists of one or more stages. Each stage must be completed for the entire pipeline to succeed. 
+The Pipeline we use to deploy our app has three stages: `Build`, `Test` and `Deploy`. With Kubernetes, we can run each stage in a separate container, so that each has its own clean and specialized environment. No need to install dependencies for all stages on the worker node. Cool, huh?
 
-The Pipeline we use to deploy our app has three stages: `Build`, `Test` and `Deploy`. Each stage is executed in a different container. It is good practice to have a stages run in a clean environment that contains all required  dependencies.
+What do those stages do?
 
-The `Build` stage uses the `gcloud` container to build an image from our Dockerfile and save it to GCP's Container Registry. The image tag is dynamic: its version number corresponds to the build number, an environment variable that is available per default in Jenkins.
+The `Build` stage uses the `gcloud` container to build an image from our Dockerfile and submit it to the Cloud Container Registry. The image tag is dynamic: its version number corresponds to the build number, an environment variable that is available per default in Jenkins.
 
-The `Test`stage uses the image that we just built and tests it using `pytest`. Does our API work? If our test passes, the stage is successful and we move on to the next stage.
+The `Test`stage uses the image that we just built and tests it using `pytest`. Does our API work? If so, the stage is successful and we move on to the next stage. In production scenarios, you would run a battery of tests and maybe save the results as an artifact. But here we're satisfied with a simple "works / doesn't work" check.
 
-The `Deploy`stage deploys the app to the Kubernetes cluster. This requires Kubernetes manifest files for the deployment and the load balancer. How to define these files is beyond the scope of this tutorial however. The Kubernetes homepage provides some great resources however.
+The `Deploy`stage deploys the app to the Kubernetes cluster. This requires Kubernetes manifest files for the deployment and the service (load balancer). How to define these files is beyond the scope of this tutorial however. The Kubernetes homepage provides some great resources however.
 
 A caveat: containers defined in our Kubernetes agent (explained shortly) have to be available from the get-go. In other words, the initial version of our app  (iris-app:v1) must exist in the Container Registry _before_ the pipeline runs for the first time. This is why you once have to build the image manually:
-
-```bash
-gcloud builds submit -t gcr.io/sandfox/iris-app:v1
-```
 
 Let's break down the Jenkins Pipeline, step by step:
 
@@ -159,19 +185,6 @@ To sum up, our Jenkinsfile defines a Pipeline that will:
 But enough theory. Let's set up our GKE cluster!
 
 ### How to set up a Google Kubernetes Engine Cluster
-
-Navigate to the GCP console and open your cloud shell. Start by setting and exporting your project.
-
-```bash
-gcloud config set project <YOUR-PROJECT-ID>
-export PROJECT=$(gcloud config get-value project)
-```
-
-Next, define your preferred compute zone (saves some typing later):
-
-```bash
-gcloud config set compute/zone us-central1-a
-```
 
 Create a service account for Jenkins:
 
