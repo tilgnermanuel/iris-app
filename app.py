@@ -8,7 +8,7 @@ model = joblib.load('iris.mdl')
 
 @app.route('/', methods=['GET'])
 def home_page():
-    return 'Iris Dataset Prediction API. Send your POST request to /predict'
+    return 'Iris Dataset Prediction API. Send your POST request to /predict to get predictions.'
 
 
 @app.route('/predict', methods=['POST'])
