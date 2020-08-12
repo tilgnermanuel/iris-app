@@ -82,9 +82,9 @@ The `Build` stage uses the `gcloud` container to build an image from our Dockerf
 
 The `Test`stage uses the image that we just built and tests it using `pytest`. Does our API work? If so, the stage is successful and we move on to the next stage. In production scenarios, you would run a battery of tests and maybe save the results as an artifact. But here we're satisfied with a simple "works / doesn't work" check.
 
-The `Deploy`stage deploys the app to the Kubernetes cluster. This requires Kubernetes manifest files for the deployment and the service (load balancer). How to define these files is beyond the scope of this tutorial however. The Kubernetes homepage provides some great resources however.
+The `Deploy`stage deploys the app to the Kubernetes cluster. This requires Kubernetes manifest files for the deployment and the service (load balancer). How to define these files is unfortunately beyond the scope of this tutorial. The Kubernetes homepage provides some great resources however.
 
-A caveat: containers defined in our Kubernetes agent (explained shortly) have to be available from the get-go. In other words, the initial version of our app  (iris-app:v1) must exist in the Container Registry _before_ the pipeline runs for the first time. This is why you once have to build the image manually:
+Now the reason for the initial build in the shell: containers defined in our Kubernetes agent (see Jenkinsfile below) have to be available from the get-go. In other words, the initial version of our app  (iris-app:v1) must exist in the Container Registry _before_ the pipeline runs for the first time. This is why you once have to build the image manually.
 
 Let's break down the Jenkins Pipeline, step by step:
 
