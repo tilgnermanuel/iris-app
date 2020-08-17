@@ -2,36 +2,36 @@
 
 ### Introduction
 
-In this tutorial, we set up a simple CI/CD pipeline for a Flask app using Jenkins and Google Kubernetes Engine (GKE). To do this, we first containerize the app with Docker. Then, we set up a Kubernetes cluster on Google Cloud Platform (GCP). Last, we define a Jenkins pipeline and run it. The objective is to have our app running on GKE as a web service. 
+In this tutorial, we set up a simple CI/CD pipeline for a Flask app using Jenkins and Google Kubernetes Engine (GKE). To this end, we first containerize the app with Docker. Then, we set up a Kubernetes cluster on Google Cloud Platform (GCP). Last, we define a Jenkins pipeline and run it. The objective is to have our app running on GKE as a web service. 
 
-Why bother setting up a whole CI/CD pipeline? Can't we just deploy our app to GKE directly? We can. But imagine having to do this manually over and over again, every time you make a small change to your app. Why not just let Jenkins do the work and automatically deploy the app when a new version becomes available?
+One might ask: why bother setting up a whole CI/CD pipeline? Can't we just deploy our app to GKE directly? We can. But imagine having to do this over and over again, every time you make a small change to your app. Why not just let Jenkins do the work and automatically deploy the app when a new version becomes available?
 
 ### Introducing the app
 
-Our starting point is a Flask app developed by my colleague Jannik. This Flask app exposes a K-Nearest Neighbor model as an API, which is a quick and simple way to share it others. People can send requests to the API with data they collected and get a prediction without complex technology or prerequisite knowledge. Check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
+Our starting point is a Flask app developed by my colleague Jannik. This Flask app exposes a K-Nearest Neighbor model as an API, which is a quick and simple way to share it with others. People can send requests to the API with data they collected and get a prediction without needing to know the intricacies of the model. Check out [Jannik's post](https://www.statworx.com/de/blog/how-to-build-a-machine-learning-api-with-python-and-flask/) to learn more. 
 
-In order for others to use Jannik's API, we need to run it somewhere. While there are many options, such as VMs, serverless solutions (e.g. Cloud Run, Heroku) and others, a Kubernetes cluster has several benefits. We can complement the API with other services (e.g. a database), easily scale it up and down or load balance it, perform rolling updates and more.
+In order for people to use Jannik's API, we need to run it somewhere. While there are many options like VMs, serverless solutions (e.g. Cloud Run), Heroku and others, Kubernetes has several benefits. Kubernetes makes it easy to complement our API with other services (e.g. a database), scale it up or down, load balance traffic, perform rolling updates and more.
 
-Deploying the app manually however is tedious, inefficient and error-prone. That's why we bring in Jenkins to do it for us. Both Kubernetes and Jenkins are as powerful as they are complex. My hope is to provide you with a better understanding as well as a template that you can tweak for your own deployments. 
+Deploying apps manually to Kubernetes (or elsewhere) however is tedious, inefficient and error-prone. That's why we have Jenkins do it for us. Both Kubernetes and Jenkins are as powerful as they are complex. My hope is to provide you with a better understanding of these tools as well as a template that you can tweak for your own deployments. 
 
-A heads-up: This tutorial is geared towards GCP and uses auxiliary services such as IAM, Cloud Build and Cloud Container Registry. To keep things short and focused, I won't discuss them further. Moreover, if you use a different cloud provider, setting up Kubernetes will differ, but you can still use the Kubernetes and Jenkins code samples. 
+A heads-up: This tutorial is geared towards GCP and uses auxiliary services such as Cloud IAM, Cloud Build and Cloud Container Registry. To keep the post focused, I won't discuss them further here. Also, if you use a different cloud provider, setting up Kubernetes will differ, but you can still use the Kubernetes and Jenkins code samples. 
 
 ### Dockerizing the app
 
-Open your cloud shell on GCP. First, let's set some environment variables.
+We start by navigating to the GCP console and opening the cloud shell. First things first: we set some environment variables.
 
 ```bash
-gcloud config set project <YOUR-PROJECT-ID>
+gcloud config set project <YOUR-PROJECT-ID> # e.g. my-first-project
 export PROJECT=$(gcloud config get-value project)
 ```
 
 Next, define your preferred compute zone (saves some typing later):
 
 ```bash
-gcloud config set compute/zone us-central1-a
+gcloud config set compute/zone <ZONE-CLOSE-TO-YOU> # e.g. us-central1-a
 ```
 
-Then, clone the GitHub repository and change into the directory.
+Then, clone the GitHub repository and move into the directory.
 
 ```bash
 git clone https://github.com/tilgnermanuel/iris-app.git
@@ -42,17 +42,17 @@ You should now see the raw app code. Time to containerize it! For this we use th
 
 ```dockerfile
 FROM python:3.7-slim
+LABEL maintainer="tilgnermanuel"
 WORKDIR /app
 COPY requirements.txt app.py model.py test.py iris.mdl /app/
 RUN pip3 install -r requirements.txt
-EXPOSE 8080
 ENTRYPOINT [ "python3" ]
 CMD [ "app.py" ]
 ```
 
-What happens here is that we copy the app code to the container and install all dependencies. Then, we expose the app on port 8080. That's it!
+If you dockerized Flask applications before you may notice that we don't expose any ports here. This is handled by the Kubernetes Service object.
 
-For reasons I'll explain later, we have to perform one initial build of the app and submit it to the Google Cloud Container registry. Make sure to give it the same tag or Jenkins won't be able to find it later.
+For reasons I'll explain later, we have to perform one initial build of the app and submit it to the Google Cloud Container registry. Give it the same tag as below. Otherwise Jenkins won't be able to find it later.
 
 ```bash
 gcloud builds submit -t gcr.io/$PROJECT/iris-app:v1
@@ -62,13 +62,15 @@ gcloud builds submit -t gcr.io/$PROJECT/iris-app:v1
 
 ### What is CI/CD?
 
-CI/CD is a core concept in the world of DevOps. It stands for Continuous Integration/Continuous Delivery. Continuous Integration (CI) means that developers integrate their code in a central shared repository. Every commit creates a build which is verified by a test. In essence, every code change triggers a complete software life cycle. This makes it possible to quickly detect and fix errors.
+CI/CD is a core concept in the world of DevOps. It stands for Continuous Integration/Continuous Delivery. Continuous Integration (CI) means that developers integrate their code in a shared repository. Every commit creates a build which is immediately tested. This makes it possible to quickly detect and fix errors.
 
-Continuous Delivery (CD) is an extension of CI. It generally implies releasing software within short cycles. It's different from Continuous Deployment in that we create a build of the software that _could_ be released to production, but isn't. In Continuous Deployment, every build is is also deployed to production. Some of the larger tech companies deliver (deploy) software hundreds times per day!
+Continuous Delivery (CD) is an extension of CI. It generally implies releasing software within short cycles. It's different from Continuous Deployment in that we create a build of the software that _could_ be released to production, but isn't. In Continuous Deployment, every build is is also deployed to production. 
+
+Fun fact: Some of the bigger tech companies deliver / deploy software hundreds times per day!
 
 ### What is Jenkins? 
 
-To make CI/CD happen, we need a repository server to store our code, e.g. GitHub, On top of that, we need a CI/CD server that takes the code from the repository, builds our application, tests it and (optionally) deploys it. This where Jenkins comes in. Jenkins is an automation server that does just that. It's open source, highly extensible and one the most popular solutions for CI/CD.
+To make CI/CD happen, we need a repository server to store our code, e.g. GitHub. On top of that, we need a CI/CD server that takes the code from the repository, builds our application, tests it and (optionally) deploys it. This where Jenkins comes in. Jenkins is an automation server that takes care of this process. It's open source, highly extensible and one the most popular solutions for CI/CD.
 
 ### What is a Jenkins Pipeline?
 
